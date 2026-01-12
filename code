@@ -9,8 +9,8 @@
 LiquidCrystal_I2C lcd(0x27, 16, 2);   
 
 // ---------------- WiFi ----------------
-char ssid[] = "COSMOTE-200764";
-char pass[] = "sr5tah5477ats3fx";
+char ssid[] = "user";
+char pass[] = "password";
 int status = WL_IDLE_STATUS;
 WiFiServer server(80);
 
