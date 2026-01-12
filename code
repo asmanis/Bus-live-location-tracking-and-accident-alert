@@ -1,0 +1,167 @@
+#include <WiFiS3.h>
+#include <TinyGPSPlus.h>
+#include <SoftwareSerial.h>
+#include <Wire.h>
+#include <MPU6050.h>
+#include <LiquidCrystal_I2C.h>
+
+// ---------------- LCD ----------------
+LiquidCrystal_I2C lcd(0x27, 16, 2);   
+
+// ---------------- WiFi ----------------
+char ssid[] = "COSMOTE-200764";
+char pass[] = "sr5tah5477ats3fx";
+int status = WL_IDLE_STATUS;
+WiFiServer server(80);
+
+// ---------------- GPS ----------------
+static const int RXPin = 5, TXPin = 4;
+static const uint32_t GPSBaud = 9600;
+TinyGPSPlus gps;
+SoftwareSerial gpsSerial(RXPin, TXPin);
+double latitude = 37.97833, longitude = 23.67213;
+
+// ---------------- MPU6050 ----------------
+MPU6050 mpu;
+const int alertPin = 7;
+const float motionThreshold = 0.3;
+const float angleThreshold  = 10.0;
+
+// Φιλτράρισμα
+float avgAx = 0, avgAy = 0, avgAz = 0;
+const float alpha = 0.9;
+
+// Κατάσταση ατυχήματος
+bool accidentActive = false;
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  pinMode(alertPin, OUTPUT);
+
+  // -------- LCD INIT --------
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("Bus on the road");
+  lcd.setCursor(0, 1);
+  lcd.print("All Good");
+
+  // -------- WiFi --------
+  if (WiFi.status() == WL_NO_MODULE) {
+    Serial.println("Δεν εντοπίστηκε WiFi module!");
+    while (true);
+  }
+
+  Serial.println("Σύνδεση στο WiFi...");
+  while (status != WL_CONNECTED) {
+    status = WiFi.begin(ssid, pass);
+    delay(5000);
+  }
+
+  Serial.println("Συνδέθηκε στο WiFi!");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+  server.begin();
+
+  // -------- GPS --------
+  gpsSerial.begin(GPSBaud);
+
+  // -------- MPU6050 --------
+  mpu.initialize();
+  if (!mpu.testConnection()) {
+    Serial.println("Δεν εντοπίστηκε MPU6050!");
+    while (1);
+  }
+  Serial.println("MPU6050 έτοιμο!");
+}
+
+void loop() {
+
+  // ---------------- GPS ----------------
+  while (gpsSerial.available() > 0) {
+    gps.encode(gpsSerial.read());
+    if (gps.location.isUpdated()) {
+      latitude = gps.location.lat();
+      longitude = gps.location.lng();
+    }
+  }
+
+  // ---------------- MPU6050 ----------------
+  int16_t ax, ay, az, gx, gy, gz;
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+  float accelX = ax / 16384.0;
+  float accelY = ay / 16384.0;
+  float accelZ = az / 16384.0;
+
+  avgAx = alpha * avgAx + (1 - alpha) * accelX;
+  avgAy = alpha * avgAy + (1 - alpha) * accelY;
+  avgAz = alpha * avgAz + (1 - alpha) * accelZ;
+
+  float pitch = atan(avgAx / sqrt(avgAy * avgAy + avgAz * avgAz)) * 180 / PI;
+  float roll  = atan(avgAy / sqrt(avgAx * avgAx + avgAz * avgAz)) * 180 / PI;
+
+  bool motionDetected =
+    abs(accelX - avgAx) > motionThreshold ||
+    abs(accelY - avgAy) > motionThreshold ||
+    abs(accelZ - avgAz) > motionThreshold ||
+    abs(pitch) > angleThreshold ||
+    abs(roll)  > angleThreshold;
+
+  // -------- ACCIDENT LOGIC --------
+  if (motionDetected && !accidentActive) {
+    accidentActive = true;
+
+    Serial.println("Proklithike atyxhma");
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Proklithike");
+    lcd.setCursor(0, 1);
+    lcd.print("atyxhima");
+
+    digitalWrite(alertPin, HIGH);
+  }
+
+  if (!motionDetected && accidentActive) {
+    accidentActive = false;
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("System OK");
+    lcd.setCursor(0, 1);
+    lcd.print("Monitoring");
+
+    digitalWrite(alertPin, LOW);
+  }
+
+  // ---------------- WEB SERVER ----------------
+  WiFiClient client = server.available();
+  if (client) {
+    client.readStringUntil('\r');
+    client.flush();
+
+    String html = "<!DOCTYPE html><html><head>";
+    html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+    html += "<title>Live Bus Location</title>";
+    html += "<script src='https://maps.googleapis.com/maps/api/js?key=AIzaSyDvkOE9XBZeoqaxYKLHFWlzNPPEaitwL6g'></script>";
+    html += "<script>function initMap(){";
+    html += "var myLatLng={lat:" + String(latitude,6) + ",lng:" + String(longitude,6) + "};";
+    html += "var map=new google.maps.Map(document.getElementById('map'),{zoom:15,center:myLatLng});";
+    html += "new google.maps.Marker({position:myLatLng,map:map});}</script>";
+    html += "</head><body onload='initMap()'>";
+    html += "<h3>Live BUS Location</h3>";
+    html += "<div id='map' style='width:100%;height:500px;'></div>";
+    html += "</body></html>";
+
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/html");
+    client.println("Connection: close");
+    client.println();
+    client.println(html);
+    client.stop();
+  }
+
+  delay(300);
+}
