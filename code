@@ -51,7 +51,7 @@ void setup() {
   Wire.begin();
   pinMode(alertPin, OUTPUT);
 
-  // -------- LCD INIT --------
+  //LCD INIT
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
@@ -59,7 +59,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("All Good");
 
-  // -------- WiFi --------
+  //WiFi
   if (WiFi.status() == WL_NO_MODULE) {
     Serial.println("Δεν εντοπίστηκε WiFi module!");
     while (true);
@@ -76,10 +76,10 @@ void setup() {
   Serial.println(WiFi.localIP());
   server.begin();
 
-  // -------- GPS --------
+  //GPS
   gpsSerial.begin(GPSBaud);
 
-  // -------- MPU6050 --------
+  //MPU6050 
   mpu.initialize();
   if (!mpu.testConnection()) {
     Serial.println("Δεν εντοπίστηκε MPU6050!");
@@ -90,7 +90,7 @@ void setup() {
 
 void loop() {
 
-  // ---------------- GPS ----------------
+  //GPS
   while (gpsSerial.available() > 0) {
     gps.encode(gpsSerial.read());
     if (gps.location.isUpdated()) {
@@ -99,7 +99,7 @@ void loop() {
     }
   }
 
-  // ---------------- MPU6050 ----------------
+  //MPU6050 
   int16_t ax, ay, az, gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
@@ -121,7 +121,7 @@ void loop() {
     abs(pitch) > angleThreshold ||
     abs(roll)  > angleThreshold;
 
-  // -------- ACCIDENT LOGIC --------
+  //  ACCIDENT LOGIC
   if (motionDetected && !accidentActive) {
     accidentActive = true;
 
@@ -148,7 +148,7 @@ void loop() {
     digitalWrite(alertPin, LOW);
   }
 
-  // ---------------- WEB SERVER ----------------
+  //WEB SERVER 
   WiFiClient client = server.available();
   if (client) {
     client.readStringUntil('\r');
