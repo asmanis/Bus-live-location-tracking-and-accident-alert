@@ -1,7 +1,7 @@
 /**********Cyber-Physical System
 *This project presents a prototype Cyber-Physical System based on the Arduino Uno R4 WiFi platform.
 *The system integrates a GPS module (Neo-6M) for real-time school bus location tracking, an MPU6050 accelerometer
-*for motion and accident detection, and an I2C LCD for accident alerts.
+*for motion and accident detection,a Flame Sensor for detecting fire in the bus and an I2C LCD for accident alerts.
 *Sensor data are processed in real time and transmitted via a built-in WiFi web server, allowing
 *remote visualization of the system’s location on a Google Maps interface.
 *The system is experimental for educational and academic purposes only.
@@ -17,163 +17,237 @@
 #include <MPU6050.h>
 #include <LiquidCrystal_I2C.h>
 
-// ---------------- LCD ----------------
-LiquidCrystal_I2C lcd(0x27, 16, 2);   
-
-// ---------------- WiFi ----------------
-char ssid[] = "user";
-char pass[] = "password";
+//WiFi Configuration
+// WiFi network credentials
+char ssid[] = "wifi_user";
+char pass[] = "wifi_password";
 int status = WL_IDLE_STATUS;
+
+// Web server running on port 80
 WiFiServer server(80);
 
-// ---------------- GPS ----------------
-static const int RXPin = 5, TXPin = 4;
+// GPS Configuration 
+// SoftwareSerial pins for Neo-6M GPS module
+static const int RXPin = 5;
+static const int TXPin = 4;
 static const uint32_t GPSBaud = 9600;
+
+// GPS object and serial interface
 TinyGPSPlus gps;
 SoftwareSerial gpsSerial(RXPin, TXPin);
-double latitude = 37.97833, longitude = 23.67213;
 
-// ---------------- MPU6050 ----------------
+// Default location (used if GPS can't find signal)
+double latitude = 37.97833;
+double longitude = 23.67213;
+
+//MPU6050 Configuration
+// MPU6050 accelerometer
 MPU6050 mpu;
-const int alertPin = 7;
-const float motionThreshold = 0.3;
-const float angleThreshold  = 10.0;
 
-// Φιλτράρισμα
-float avgAx = 0, avgAy = 0, avgAz = 0;
+// Alert output pin (LED or shared alert line)
+const int alertPin = 7;
+
+// Thresholds for motion and tilt detection
+const float motionThreshold = 0.3;   // Acceleration difference in g
+const float angleThreshold  = 10.0;  // Tilt angle in degrees
+
+// Flame Sensor & Buzzer
+// Active buzzer pin
+const int buzzerPin = 8;
+
+// Flame sensor digital output pin (DOUT)
+const int flamePin  = 9;
+
+// LCD Configuration 
+// I2C LCD (16x2) with address 0x27
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// Accelerometer Filter
+// Filtered acceleration values
+float avgAx = 0;
+float avgAy = 0;
+float avgAz = 0;
+
+// Low-pass filter coefficient
 const float alpha = 0.9;
 
-// Κατάσταση ατυχήματος
-bool accidentActive = false;
+// Buzzer Alert Function 
+// Generates a double beep alert sound
+void buzzerBeep() {
+  digitalWrite(buzzerPin, HIGH);
+  delay(150);
+  digitalWrite(buzzerPin, LOW);
+  delay(100);
+  digitalWrite(buzzerPin, HIGH);
+  delay(150);
+  digitalWrite(buzzerPin, LOW);
+}
 
 void setup() {
+  // Initialize serial communication
   Serial.begin(115200);
-  Wire.begin();
-  pinMode(alertPin, OUTPUT);
 
-  //LCD INIT
+  // Initialize I2C bus
+  Wire.begin();
+
+  // Configure I/O pins
+  pinMode(alertPin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(flamePin, INPUT);
+
+  // Initialize LCD
   lcd.init();
   lcd.backlight();
+  lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Bus on the road");
+  lcd.print("System OK");
   lcd.setCursor(0, 1);
-  lcd.print("All Good");
+  lcd.print("Monitoring...");
 
-  //WiFi
+  // Check WiFi module availability
   if (WiFi.status() == WL_NO_MODULE) {
-    Serial.println("Δεν εντοπίστηκε WiFi module!");
     while (true);
   }
 
-  Serial.println("Σύνδεση στο WiFi...");
+  // Connect to WiFi network
   while (status != WL_CONNECTED) {
     status = WiFi.begin(ssid, pass);
-    delay(5000);
+    delay(3000);
   }
 
-  Serial.println("Συνδέθηκε στο WiFi!");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
+  // Start web server
   server.begin();
 
-  //GPS
+  // Initialize GPS serial communication
   gpsSerial.begin(GPSBaud);
 
-  //MPU6050 
+  // Initialize MPU6050 sensor
   mpu.initialize();
   if (!mpu.testConnection()) {
-    Serial.println("Δεν εντοπίστηκε MPU6050!");
-    while (1);
+    while (true);
   }
-  Serial.println("MPU6050 έτοιμο!");
 }
 
 void loop() {
 
-  //GPS
+  // GPS Data Reading 
+  // Read and decode incoming GPS data
   while (gpsSerial.available() > 0) {
     gps.encode(gpsSerial.read());
+
+    // Update coordinates when new data is available
     if (gps.location.isUpdated()) {
-      latitude = gps.location.lat();
+      latitude  = gps.location.lat();
       longitude = gps.location.lng();
     }
   }
 
-  //MPU6050 
+  // MPU6050 Data Reading 
+  // Raw accelerometer and gyroscope values
   int16_t ax, ay, az, gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
+  // Convert raw values to g units
   float accelX = ax / 16384.0;
   float accelY = ay / 16384.0;
   float accelZ = az / 16384.0;
 
+  // Apply low-pass filtering
   avgAx = alpha * avgAx + (1 - alpha) * accelX;
   avgAy = alpha * avgAy + (1 - alpha) * accelY;
   avgAz = alpha * avgAz + (1 - alpha) * accelZ;
 
+  // Calculate tilt angles (pitch and roll)
   float pitch = atan(avgAx / sqrt(avgAy * avgAy + avgAz * avgAz)) * 180 / PI;
   float roll  = atan(avgAy / sqrt(avgAx * avgAx + avgAz * avgAz)) * 180 / PI;
 
-  bool motionDetected =
-    abs(accelX - avgAx) > motionThreshold ||
-    abs(accelY - avgAy) > motionThreshold ||
-    abs(accelZ - avgAz) > motionThreshold ||
-    abs(pitch) > angleThreshold ||
-    abs(roll)  > angleThreshold;
+  // Event flags
+  bool crashDetected = false;
+  bool fireDetected  = false;
 
-  //  ACCIDENT LOGIC
-  if (motionDetected && !accidentActive) {
-    accidentActive = true;
+  // Crash Detection Logic
+  // Detect sudden motion or excessive tilt
+  if (abs(accelX - avgAx) > motionThreshold ||
+      abs(accelY - avgAy) > motionThreshold ||
+      abs(accelZ - avgAz) > motionThreshold ||
+      abs(pitch) > angleThreshold ||
+      abs(roll)  > angleThreshold) {
 
-    Serial.println("Proklithike atyxhma");
-
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Proklithike");
-    lcd.setCursor(0, 1);
-    lcd.print("atyxhima");
-
-    digitalWrite(alertPin, HIGH);
+    crashDetected = true;
   }
 
-  if (!motionDetected && accidentActive) {
-    accidentActive = false;
+  // Fire Detection Logic 
+  // Flame sensor outputs LOW when fire is detected
+  if (digitalRead(flamePin) == LOW) {
+    fireDetected = true;
+  }
 
+  // System Response
+  if (crashDetected) {
+    Serial.println("CRASH DETECTED");
+
+    // Display crash message on LCD
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("System OK");
+    lcd.print("CRASH");
     lcd.setCursor(0, 1);
-    lcd.print("Monitoring");
+    lcd.print("DETECTED");
 
+    // Activate alerts
+    digitalWrite(alertPin, HIGH);
+    buzzerBeep();
     digitalWrite(alertPin, LOW);
   }
+  else if (fireDetected) {
+    Serial.println("FIRE DETECTED");
 
-  //WEB SERVER 
+    // Display fire message on LCD
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("FIRE");
+    lcd.setCursor(0, 1);
+    lcd.print("DETECTED");
+
+    // Activate alerts
+    digitalWrite(alertPin, HIGH);
+    buzzerBeep();
+    digitalWrite(alertPin, LOW);
+  }
+  else {
+    // Normal system state
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Bus is OK");
+    lcd.setCursor(0, 1);
+    lcd.print("On the road...");
+  }
+
+  // Web Server 
+  // Serve Google Maps page with live location
   WiFiClient client = server.available();
   if (client) {
     client.readStringUntil('\r');
     client.flush();
 
     String html = "<!DOCTYPE html><html><head>";
-    html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    html += "<title>Live Bus Location</title>";
-    html += "<script src='https://maps.googleapis.com/maps/api/js?key=AIzaSyDvkOE9XBZeoqaxYKLHFWlzNPPEaitwL6g'></script>";
+    html += "<meta name='viewport' content='width=device-width'>";
+    html += "<script src='https://maps.googleapis.com/maps/api/js?key=API_KEY'></script>";
     html += "<script>function initMap(){";
-    html += "var myLatLng={lat:" + String(latitude,6) + ",lng:" + String(longitude,6) + "};";
-    html += "var map=new google.maps.Map(document.getElementById('map'),{zoom:15,center:myLatLng});";
-    html += "new google.maps.Marker({position:myLatLng,map:map});}</script>";
+    html += "var p={lat:" + String(latitude,6) + ",lng:" + String(longitude,6) + "};";
+    html += "var m=new google.maps.Map(document.getElementById('map'),{zoom:15,center:p});";
+    html += "new google.maps.Marker({position:p,map:m});}</script>";
     html += "</head><body onload='initMap()'>";
-    html += "<h3>Live BUS Location</h3>";
-    html += "<div id='map' style='width:100%;height:500px;'></div>";
+    html += "<h3>Live Bus Location</h3>";
+    html += "<div id='map' style='height:500px'></div>";
     html += "</body></html>";
 
     client.println("HTTP/1.1 200 OK");
     client.println("Content-Type: text/html");
-    client.println("Connection: close");
     client.println();
     client.println(html);
     client.stop();
   }
 
-  delay(300);
+  // Main loop delay
+  delay(400);
 }
