@@ -44,7 +44,7 @@ double longitude = 23.67213;
 // MPU6050 accelerometer
 MPU6050 mpu;
 
-// Alert output pin (LED or shared alert line)
+// Alert output pin 
 const int alertPin = 7;
 
 // Thresholds for motion and tilt detection
@@ -58,8 +58,7 @@ const int buzzerPin = 8;
 // Flame sensor digital output pin (DOUT)
 const int flamePin  = 9;
 
-// LCD Configuration 
-// I2C LCD (16x2) with address 0x27
+// I2C LCD 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // Accelerometer Filter
@@ -72,7 +71,6 @@ float avgAz = 0;
 const float alpha = 0.9;
 
 // Buzzer Alert Function 
-// Generates a double beep alert sound
 void buzzerBeep() {
   digitalWrite(buzzerPin, HIGH);
   delay(150);
