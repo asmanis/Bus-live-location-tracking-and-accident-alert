@@ -15,7 +15,7 @@ class ViewController: UIViewController {
         view.addSubview(webView)
 
         // URL του Arduino
-        let urlString = "http://192.168.1.6/"
+        let urlString = "http://000.000.0.0/"
         if let url = URL(string: urlString) {
             let request = URLRequest(url: url)
             webView.load(request)
